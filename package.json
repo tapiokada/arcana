@@ -1,0 +1,14 @@
+{
+  "name": "arcana-duel",
+  "version": "1.0.0",
+  "description": "MTG風トレーディングカードゲーム（オンライン対戦・AI対戦・オリジナルカードインポート対応）",
+  "main": "app/main.js",
+  "scripts": {
+    "start": "node app/main.js",
+    "relay": "node server/relay.js",
+    "test": "node test/run-tests.js",
+    "gen-sample": "node tools/gen-sample-images.js"
+  },
+  "engines": { "node": ">=18" },
+  "dependencies": { "ws": "^8.18.0" }
+}
