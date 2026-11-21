@@ -114,17 +114,58 @@ async function main() {
   const relayPort = arg('--relay', null);
   if (relayPort) {
     const { startRelay } = require('../server/relay');
-    await startRelay(relayPort === true ? 7700 : Number(relayPort));
+    try {
+      await startRelay(relayPort === true ? 7700 : Number(relayPort));
+    } catch (e) {
+      console.warn('[relay] 中継サーバーは起動しませんでした:', e.message);
+    }
   }
-  server.listen(PORT, '127.0.0.1', () => {
-    const u = `http://localhost:${PORT}/`;
+  listenOn(PORT, 0);
+}
+
+function openBrowser(u) {
+  if (arg('--no-open', false) || process.env.NO_OPEN) return;
+  const cmd = process.platform === 'win32' ? `start "" "${u}"` : process.platform === 'darwin' ? `open "${u}"` : `xdg-open "${u}"`;
+  exec(cmd, () => {});
+}
+
+/** 既に Arcana Duel が動いているポートか確認する */
+async function isArcanaRunning(port) {
+  try {
+    const r = await fetch(`http://127.0.0.1:${port}/api/profile`, { signal: AbortSignal.timeout(1500) });
+    const j = await r.json();
+    return !!(j && j.profile && j.rules);
+  } catch { return false; }
+}
+
+// ポートが使用中なら: Arcana Duel が起動済みならそれを開く / 別のプログラムなら次のポートを試す
+function listenOn(port, attempt) {
+  const onError = async (e) => {
+    server.off('listening', onListening);
+    if (e.code !== 'EADDRINUSE') { console.error('起動に失敗しました:', e.message); process.exit(1); }
+    if (await isArcanaRunning(port)) {
+      const u = `http://localhost:${port}/`;
+      console.log(`Arcana Duel は既に起動しています: ${u}`);
+      console.log('（同時に2つ動かす場合は --port 3001 --data ./data2 のように別ポート・別データで起動してください）');
+      openBrowser(u);
+      setTimeout(() => process.exit(0), 500);
+      return;
+    }
+    if (attempt >= 20) { console.error(`ポート ${PORT}〜${port} がすべて使用中です。--port で空いているポートを指定してください。`); process.exit(1); }
+    console.warn(`ポート ${port} は他のプログラムが使用中のため、${port + 1} を試します…`);
+    listenOn(port + 1, attempt + 1);
+  };
+  const onListening = () => {
+    server.off('error', onError);
+    const u = `http://localhost:${port}/`;
     console.log(`Arcana Duel を起動しました: ${u}`);
     console.log(`データ保存先: ${DATA}`);
     if (store.loadErrors.length) console.warn('読み込めなかったセット:', JSON.stringify(store.loadErrors, null, 1));
-    if (!arg('--no-open', false) && !process.env.NO_OPEN) {
-      const cmd = process.platform === 'win32' ? `start "" "${u}"` : process.platform === 'darwin' ? `open "${u}"` : `xdg-open "${u}"`;
-      exec(cmd, () => {});
-    }
-  });
+    openBrowser(u);
+  };
+  server.once('error', onError);
+  server.once('listening', onListening);
+  server.listen(port, '127.0.0.1');
 }
+wss.on('error', () => {}); // ポート使用中エラーは server 側で処理する
 main();

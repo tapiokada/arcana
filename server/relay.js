@@ -90,12 +90,21 @@ function startRelay(port = 7700, { log = console.log } = {}) {
   }, 20000);
   wss.on('close', () => clearInterval(iv));
 
-  return new Promise((resolve) => server.listen(port, () => {
-    log(`[relay] listening on port ${server.address().port}`);
-    resolve({ server, wss, port: server.address().port, close: () => { clearInterval(iv); wss.close(); server.close(); } });
-  }));
+  wss.on('error', () => {}); // ポート使用中エラーは server 側で処理する
+  return new Promise((resolve, reject) => {
+    server.once('error', (e) => {
+      clearInterval(iv);
+      reject(e.code === 'EADDRINUSE' ? new Error(`ポート ${port} は既に使用中です（中継サーバーが起動済みか、別のプログラムが使っています）`) : e);
+    });
+    server.listen(port, () => {
+      log(`[relay] listening on port ${server.address().port}`);
+      resolve({ server, wss, port: server.address().port, close: () => { clearInterval(iv); wss.close(); server.close(); } });
+    });
+  });
 }
 
-if (require.main === module) startRelay(Number(process.argv[2] || process.env.RELAY_PORT || 7700));
+if (require.main === module) {
+  startRelay(Number(process.argv[2] || process.env.RELAY_PORT || 7700)).catch((e) => { console.error('[relay] 起動に失敗しました:', e.message); process.exit(1); });
+}
 
 module.exports = { startRelay, PROTOCOL };
