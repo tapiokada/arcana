@@ -1,6 +1,7 @@
 // スターターセット set.json を生成するスクリプト（サンプル兼インポート仕様の例）
 const fs = require('fs');
 const path = require('path');
+const { render } = require('./art-ad1');
 let n = 0;
 const id = () => 'AD-' + String(++n).padStart(3, '0');
 const C = (o) => ({ id: id(), image: null, ...o });
@@ -64,6 +65,33 @@ const set = {
   set: { code: 'AD1', name: 'アルカナの夜明け（スターター）', version: '1.0.0', author: 'Arcana Duel', description: '同梱のサンプル・セット。インポート仕様の記述例も兼ねる。', starter: true },
   cards,
 };
-const out = path.join(__dirname, '..', 'sets', 'starter', 'set.json');
+// 絵柄: カード名 → [背景, 主題]（主題は第2弾も含めて使い回しなし）
+const ART = {
+  見習い衛兵: ['castle', 'recruit'], 暁の天馬: ['dawn', 'pegasus'], 聖堂の守護者: ['castle', 'guardian'], 癒しの光: ['meadow', 'healingLight'],
+  聖なる懲罰: ['storm', 'smite'], 守護の加護: ['temple', 'aegis'], 集いの角笛: ['meadow', 'trumpet'], 光輝の将軍セリア: ['castle', 'general'],
+  霧の斥候: ['shore', 'seabird'], 叡智の閃き: ['night', 'crystalBall'], 引き潮: ['shore', 'tide'], 凍結の息吹: ['peaks', 'snowflake'],
+  否認の言葉: ['library', 'palmWard'], 風読みの精霊: ['sky', 'windSpirit'], 深淵の大海蛇: ['sea', 'seaSerpent'], 時の賢者オルド: ['library', 'timeSage'],
+  腐肉喰らいの鼠: ['swamp', 'rat'], 骨鳴りの兵: ['crypt', 'skeletonWarrior'], 生命吸収: ['dusk', 'drainHeart'], 墓所からの呼び声: ['dusk', 'graveHand'],
+  終焉の囁き: ['storm', 'raven'], 思考の腐蝕: ['swamp', 'brokenMind'], 夜宴の吸血鬼: ['castle', 'vampireLord'], 冥府の王ヴァルゴス: ['volcano', 'demon'],
+  火花の小鬼: ['peaks', 'imp'], 雷撃の矢: ['storm', 'lightningBolt'], 闘志の炎: ['dusk', 'flamingSword'], 戦場の狂戦士: ['meadow', 'berserker'],
+  ゴブリンの扇動者: ['cave', 'goblinChief'], 溶岩の巨人: ['volcano', 'lavaGolem'], 灼熱の嵐: ['dusk', 'firestorm'], 紅蓮竜ヴォルカリオン: ['peaks', 'dragonHead'],
+  森のエルフ: ['glade', 'elfMage'], 樫の森の熊: ['forest', 'bear'], 大樹の番人: ['meadow', 'treefolk'], 野生の膨張: ['glade', 'muscleArm'],
+  成長の儀式: ['meadow', 'standingStones'], 自然の還元: ['glade', 'vineCrushGear'], 獣の咆哮: ['night', 'wolfHowl'], 古森の主グラドン: ['glade', 'forestElemental'],
+  真鍮の番兵: ['castle', 'brassAutomaton'], 魔力の宝珠: ['night', 'manaOrb'], 勇者の長剣: ['meadow', 'longsword'], 賢者の書: ['library', 'openBook'],
+  平地: ['meadow', 'wheatField'], 島: ['shore', 'isle'], 沼: ['swamp', 'deadTree'], 山: ['peaks', 'summit'], 森: ['forest', 'oldGrove'],
+};
+const LAND_COLOR = { Plains: 'W', Island: 'U', Swamp: 'B', Mountain: 'R', Forest: 'G' };
+const dir = path.join(__dirname, '..', 'sets', 'starter');
+fs.mkdirSync(path.join(dir, 'images'), { recursive: true });
+const usedMotif = new Map();
+for (const c of cards) {
+  const a = ART[c.name];
+  if (!a) throw new Error(`絵柄の指定がありません: ${c.name}`);
+  if (usedMotif.has(a[1])) throw new Error(`主題 "${a[1]}" が ${usedMotif.get(a[1])} と ${c.name} で重複しています`);
+  usedMotif.set(a[1], c.name);
+  const color = ((c.cost || '').match(/[WUBRG]/) || [])[0] || LAND_COLOR[(c.subtypes || [])[0]] || 'C';
+  fs.writeFileSync(path.join(dir, c.image), render({ scene: a[0], motif: a[1], color }));
+}
+const out = path.join(dir, 'set.json');
 fs.writeFileSync(out, JSON.stringify(set, null, 2));
 console.log('wrote', out, cards.length, 'cards');

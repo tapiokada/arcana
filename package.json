@@ -7,7 +7,7 @@
     "start": "node app/main.js",
     "relay": "node server/relay.js",
     "test": "node test/run-tests.js",
-    "gen-sample": "node tools/gen-sample-images.js"
+    "build-sets": "node tools/build-starter.js && node tools/build-ruins.js"
   },
   "engines": { "node": ">=18" },
   "dependencies": { "ws": "^8.18.0" }
