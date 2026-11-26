@@ -5,11 +5,14 @@ const { normalizeDef, validateSet } = require('../engine/cards');
 const { Game } = require('../engine/game');
 const { chooseAction } = require('../engine/ai');
 const { buildAIDeck } = require('../app/lib/decks');
-const set = JSON.parse(fs.readFileSync(path.join(__dirname, '../sets/starter/set.json'), 'utf8'));
-const v = validateSet(set, (f) => fs.existsSync(path.join(__dirname, '../sets/starter', f)));
-if (v.errors.length) { console.error(v.errors); process.exit(1); }
 const defs = {};
-for (const c of set.cards) defs[c.id] = normalizeDef(c, 'AD1');
+for (const dir of fs.readdirSync(path.join(__dirname, '../sets'))) {
+  const base = path.join(__dirname, '../sets', dir);
+  const set = JSON.parse(fs.readFileSync(path.join(base, 'set.json'), 'utf8'));
+  const v = validateSet(set, (f) => fs.existsSync(path.join(base, f)));
+  if (v.errors.length) { console.error(dir, v.errors); process.exit(1); }
+  for (const c of set.cards) defs[c.id] = normalizeDef(c, set.set.code);
+}
 let wins = [0, 0, 0], turns = 0;
 const N = +(process.argv[2] || 200);
 for (let g = 0; g < N; g++) {

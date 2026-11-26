@@ -250,9 +250,11 @@ class Game {
     }
     if (c.zone === 'graveyard') {
       if (c.owner !== controller) return false;
-      if (kind === 'card_in_your_graveyard') return true;
-      if (kind === 'creature_card_in_your_graveyard') return d.types.includes('Creature');
-      return false;
+      if (kind !== 'card_in_your_graveyard' && !(kind === 'creature_card_in_your_graveyard' && d.types.includes('Creature'))) return false;
+      if (f.maxManaValue !== undefined && d.mv > f.maxManaValue) return false;
+      if (f.color && !d.colors.includes(f.color)) return false;
+      if (f.notColor && d.colors.includes(f.notColor)) return false;
+      return true;
     }
     if (c.zone !== 'battlefield') return false;
     const ch = this.chars(c);
@@ -546,6 +548,21 @@ class Game {
         this.decision = null;
         return;
       }
+      case 'scry': {
+        // a.bottom: ライブラリーの一番下に置くカード / a.top: 上に残すカードの順（省略時は元の順）
+        if (a.type !== 'scry') return { error: '占術の選択をしてください' };
+        const bottom = [...new Set(a.bottom || [])];
+        if (bottom.some((id) => !d.cards.includes(id))) return { error: '不正なカードです' };
+        const lib = pl.library;
+        const keep = (a.top && a.top.length ? a.top : d.cards).filter((id) => !bottom.includes(id));
+        if (keep.length + bottom.length !== d.cards.length || keep.some((id) => !d.cards.includes(id))) return { error: '全てのカードを上か下に振り分けてください' };
+        lib.splice(lib.length - d.cards.length, d.cards.length);
+        lib.unshift(...bottom);
+        lib.push(...keep.slice().reverse());
+        this.addLog(`${pl.name} は占術${d.n}を行った（上に${keep.length}枚・下に${bottom.length}枚）`);
+        this.decision = null;
+        return;
+      }
       case 'targets': {
         if (a.type !== 'chooseTargets') return { error: '対象を選んでください' };
         const err = this.checkTargets(d.slots, a.targets);
@@ -603,6 +620,7 @@ class Game {
     this.turn++;
     this.active = this.turn === 1 ? this.startPlayer : this.opp(this.active);
     this.players[this.active].landsPlayed = 0;
+    this.resolvedThisTurn = 0;
     this.addLog(`―― ターン${this.turn}（${this.players[this.active].name}）――`);
     this.enterStep('untap');
   }
@@ -746,6 +764,15 @@ class Game {
 
   // ---------- 解決 ----------
   resolveTop() {
+    // 終わらない強制ループ（同一ターン内で解決が多すぎる）は引き分け（総合ルール 104.4b 相当）
+    this.resolvedThisTurn = (this.resolvedThisTurn || 0) + 1;
+    if (this.resolvedThisTurn > 300) {
+      this.addLog('終わらないループが発生したため、ゲームは引き分けになった');
+      this.players.forEach((pl) => { pl.lost = true; });
+      this.stack = [];
+      this.checkWinner();
+      return;
+    }
     const item = this.stack.pop();
     const legal = item.targets.map((t, i) => this.matchTarget(item.slots[i], item.controller, t));
     const fizzle = item.targets.length > 0 && legal.every((x) => !x);
@@ -776,7 +803,7 @@ class Game {
 
   selectSubject(subject, item, action) {
     const p = item.controller;
-    const def = ['draw', 'gain_life', 'lose_life', 'add_mana', 'token', 'discard', 'mill'].includes(action) ? 'you' : 'self';
+    const def = ['draw', 'gain_life', 'lose_life', 'add_mana', 'token', 'discard', 'mill', 'scry'].includes(action) ? 'you' : 'self';
     const bfCreatures = () => this.battlefield.filter((id) => this.isCreature(this.cards[id]));
     switch (subject || def) {
       case 'you': return ['p' + p];
@@ -796,8 +823,21 @@ class Game {
     item.effects.forEach((e, i) => {
       const si = item.map[i];
       const targets = si === null || si === undefined ? this.selectSubject(e.subject, item, e.action) : legal[si] ? [item.targets[si]] : [];
+      if (e.condition && !this.checkCondition(e.condition, item.controller)) return;
       this.doEffect(e, targets.filter((t) => t[0] === 'p' || this.cards[t]), item);
     });
+  }
+
+  /** 条件付き効果（共鳴など）の判定。解決時点の状態で判定する */
+  checkCondition(cond, p) {
+    const pl = this.players[p];
+    if (cond.youControl) {
+      const n = this.battlefield.filter((id) => this.cards[id].controller === p && this.hasType(this.cards[id], cond.youControl.type)).length;
+      if (n < (cond.youControl.min ?? 1)) return false;
+    }
+    if (cond.yourLifeAtMost !== undefined && pl.life > cond.yourLifeAtMost) return false;
+    if (cond.cardsInYourGraveyardAtLeast !== undefined && pl.graveyard.length < cond.cardsInYourGraveyardAtLeast) return false;
+    return true;
   }
 
   doEffect(e, targets, item) {
@@ -852,6 +892,7 @@ class Game {
           break;
         }
         case 'sacrifice': if (c && c.zone === 'battlefield') this.moveCard(t, 'graveyard'); break;
+        case 'scry': if (isP(t) && P(t).library.length) this.pendingDiscards.push({ kind: 'scry', player: Number(t.slice(1)), n: amt }); break;
         default: break;
       }
     }
@@ -893,6 +934,12 @@ class Game {
       case 'end_step': return ev.type === 'step' && ev.step === 'end' && ev.active === s.controller;
       case 'cast_spell': return ev.type === 'cast' && ev.controller === s.controller && (ab.filter !== 'noncreature' || !ev.creature);
       case 'deals_combat_damage_to_player': return ev.type === 'combatDamagePlayer' && ev.sourceId === s.id;
+      case 'creature_dies':
+        if (ev.type !== 'dies') return false;
+        if (ab.filter === 'yours') return ev.snapshot.controller === s.controller;
+        if (ab.filter === 'opponents') return ev.snapshot.controller !== s.controller;
+        return true;
+      case 'artifact_etb_you_control': return ev.type === 'etb' && evc && this.hasType(evc, 'Artifact') && evc.controller === s.controller;
       default: return false;
     }
   }
@@ -997,6 +1044,12 @@ class Game {
       if (this.decision) return;
       if (this.pendingDiscards.length) {
         const pd = this.pendingDiscards.shift();
+        if (pd.kind === 'scry') {
+          const lib = this.players[pd.player].library;
+          const k = Math.min(pd.n, lib.length);
+          if (k > 0) { this.decision = { kind: 'scry', player: pd.player, n: k, cards: lib.slice(-k).reverse() }; return; }
+          continue;
+        }
         const n = Math.min(pd.n, this.players[pd.player].hand.length);
         if (n > 0) { this.decision = { kind: 'discard', player: pd.player, n }; return; }
         continue;
@@ -1039,6 +1092,7 @@ class Game {
     if (dec) {
       if (dec.player === p) {
         decision = { kind: dec.kind, n: dec.n, options: dec.options, name: dec.name, slots: dec.slots };
+        if (dec.kind === 'scry') decision.cards = dec.cards.map((id) => this.cardView(id, p));
         if (dec.kind === 'blockers') {
           decision.blockers = this.eligibleBlockers(p);
           decision.attackers = this.combat.attackers.map((a) => a.id);

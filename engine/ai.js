@@ -77,6 +77,14 @@ function sortForBottom(game, p, ids) {
   return landsOnBf + lands.length > 4 ? [...lands, ...spells] : [...spells, ...lands];
 }
 
+/** 占術: 土地が足りていれば土地を、足りなければ重すぎる呪文を下へ */
+function chooseScryBottom(game, p, ids) {
+  const isLand = (id) => game.def(game.cards[id]).isLand;
+  const pl = game.players[p];
+  const lands = game.battlefield.filter((id) => game.cards[id].controller === p && isLand(id)).length + pl.hand.filter(isLand).length;
+  return ids.filter((id) => (isLand(id) ? lands >= 5 : game.def(game.cards[id]).mv > lands + 2));
+}
+
 function canBlock(game, blockerId, attackerId) {
   const A = game.cards[attackerId];
   const B = game.cards[blockerId];
@@ -146,6 +154,7 @@ function chooseAction(game, p) {
       }
       case 'bottom': return { type: 'bottom', cardIds: sortForBottom(game, p, pl.hand).slice(0, d.n) };
       case 'discard': return { type: 'discard', cardIds: sortForBottom(game, p, pl.hand).slice(0, d.n) };
+      case 'scry': return { type: 'scry', bottom: chooseScryBottom(game, p, d.cards) };
       case 'attackers': return { type: 'declareAttackers', attackers: chooseAttackers(game, p, d.options) };
       case 'blockers': return { type: 'declareBlockers', blocks: chooseBlocks(game, p) };
       case 'targets': {
@@ -198,7 +207,7 @@ function chooseAction(game, p) {
       const c = game.cards[a.permId];
       const ab = game.def(c).abilities[a.index];
       const effs = ab.effects || [];
-      if (ab.parsedCost.sacrifice) continue;
+      if (ab.parsedCost.sacrifice && !c.isToken) continue;
       if (effs.some((e) => e.action === 'attach') && c.attachedTo) continue;
       const { map } = game.slotsFromEffects(effs);
       const targets = a.slots.length ? pickTargets(game, p, a.slots, effs, map) : [];

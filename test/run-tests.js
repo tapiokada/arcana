@@ -9,6 +9,9 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   console.log('[1] AI同士の対戦シミュレーション');
   console.log(execFileSync('node', [path.join(__dirname, 'sim.js'), '300']).toString().trim());
 
+  console.log('[1b] 第2弾ルールの単体テスト');
+  console.log(execFileSync('node', [path.join(__dirname, 'mechanics.js')]).toString().trimEnd());
+
   console.log('[2] インポート検証');
   const { validateSet } = require('../engine/cards');
   const bad = validateSet({ format: 'arcana-set/1', set: { code: 'X1', name: 'x' }, cards: [{ id: 'a', name: 'a', types: ['Creature'], cost: '{Q}' }] });

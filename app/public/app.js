@@ -69,7 +69,7 @@ function onMsg(m) {
 function sameDecision(a, b) {
   const ka = a.decision && a.decision.kind;
   const kb = b.decision && b.decision.kind;
-  return ka && ka === kb && ['attackers', 'blockers', 'bottom', 'discard', 'mulligan'].includes(ka);
+  return ka && ka === kb && ['attackers', 'blockers', 'bottom', 'discard', 'mulligan', 'scry'].includes(ka);
 }
 function toast(msg, cls = '') {
   const d = h('div', { class: cls }, msg);
@@ -593,6 +593,7 @@ function renderGame() {
   } else if (dec) {
     switch (dec.kind) {
       case 'mulligan': prompt.append('手札をキープしますか？'); break;
+      case 'scry': prompt.append(`🔮 占術${dec.n}：ライブラリーの上のカードを確認しています`); break;
       case 'bottom': case 'discard': {
         ui.sel = ui.sel || new Set();
         prompt.append(dec.kind === 'bottom' ? `ライブラリーの一番下に置くカードを ${dec.n} 枚選んでください` : `捨てるカードを ${dec.n} 枚選んでください`, ` （${ui.sel.size}/${dec.n}）`);
@@ -616,7 +617,7 @@ function renderGame() {
       default: break;
     }
   } else if (v.decision && v.decision.kind === 'waiting') {
-    prompt.append(h('span', { class: 'muted' }, { mulligan: '相手がマリガンを検討中…', attackers: '相手が攻撃を選んでいます…', blockers: '相手がブロックを選んでいます…', targets: '相手が対象を選んでいます…', discard: '相手がカードを捨てています…', bottom: '相手がカードを選んでいます…' }[v.decision.for] || '相手の選択を待っています…'));
+    prompt.append(h('span', { class: 'muted' }, { mulligan: '相手がマリガンを検討中…', attackers: '相手が攻撃を選んでいます…', blockers: '相手がブロックを選んでいます…', targets: '相手が対象を選んでいます…', scry: '相手が占術を行っています…', discard: '相手がカードを捨てています…', bottom: '相手がカードを選んでいます…' }[v.decision.for] || '相手の選択を待っています…'));
   } else if (v.priority === me) {
     if (v.stack.length) {
       const top = v.stack[v.stack.length - 1];
@@ -676,7 +677,23 @@ function renderGame() {
 
   // マリガンのモーダル / 結果
   const modal = $('#modal');
-  if (dec && dec.kind === 'mulligan') {
+  if (dec && dec.kind === 'scry') {
+    // 占術: クリックで「上に残す」「一番下へ」を切り替える
+    ui.scryBottom = ui.scryBottom || new Set();
+    modal.innerHTML = '';
+    modal.append(h('div', { class: 'box', style: 'text-align:center' },
+      h('h2', {}, `占術${dec.n}`),
+      h('p', { class: 'muted' }, 'ライブラリーの上から見たカードです（左が一番上）。クリックで「一番下へ」と「上に残す」を切り替えます。'),
+      h('div', { class: 'grid', style: 'justify-content:center' }, dec.cards.map((c) => {
+        const down = ui.scryBottom.has(c.id);
+        return h('div', { class: 'cell', style: down ? 'opacity:.55' : '' },
+          cardEl(c, { w: 150, cls: down ? '' : 'can-act', onclick: () => { down ? ui.scryBottom.delete(c.id) : ui.scryBottom.add(c.id); renderGame(); } }),
+          h('div', { class: 'under', style: `font-weight:700;color:${down ? '#ff9c9c' : 'var(--ok)'}` }, down ? '↓ 一番下へ' : '↑ 上に残す'));
+      })),
+      h('button', { class: 'primary', onclick: () => { modal.classList.add('hidden'); act({ type: 'scry', bottom: [...ui.scryBottom] }); } }, '決定')));
+    modal.classList.remove('hidden');
+    modal.onclick = null;
+  } else if (dec && dec.kind === 'mulligan') {
     modal.innerHTML = '';
     const mul = v.players[me].mulligans;
     modal.append(h('div', { class: 'box', style: 'text-align:center' }, h('h2', {}, mul ? `マリガン ${mul}回目（キープ後 ${mul}枚をライブラリーの下へ）` : '初期手札'),
@@ -698,7 +715,7 @@ function renderGame() {
     modal.onclick = null;
   } else if (!modal.classList.contains('hidden') && !modal.querySelector('.grid .targetable') && modal.dataset.keep !== '1') {
     // 墓地表示などはそのまま、マリガン後は閉じる
-    if (modal.querySelector('.result') || modal.textContent.includes('初期手札') || modal.textContent.includes('マリガン')) modal.classList.add('hidden');
+    if (modal.querySelector('.result') || modal.textContent.includes('初期手札') || modal.textContent.includes('マリガン') || modal.textContent.includes('占術')) modal.classList.add('hidden');
   }
 }
 

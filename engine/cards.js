@@ -18,7 +18,7 @@ const KEYWORD_JA = {
 };
 const ACTIONS = [
   'damage', 'draw', 'gain_life', 'lose_life', 'destroy', 'exile', 'bounce', 'tap', 'untap', 'pump',
-  'counters', 'token', 'counter', 'discard', 'mill', 'add_mana', 'return_from_graveyard', 'attach', 'sacrifice',
+  'counters', 'token', 'counter', 'discard', 'mill', 'add_mana', 'return_from_graveyard', 'attach', 'sacrifice', 'scry',
 ];
 const TARGET_KINDS = [
   'any', 'player', 'opponent', 'creature', 'creature_you_control', 'creature_opponent_controls',
@@ -32,8 +32,9 @@ const SUBJECTS = [
 ];
 const TRIGGERS = [
   'etb', 'dies', 'attacks', 'upkeep', 'end_step', 'creature_etb_you_control', 'landfall',
-  'cast_spell', 'deals_combat_damage_to_player',
+  'cast_spell', 'deals_combat_damage_to_player', 'creature_dies', 'artifact_etb_you_control',
 ];
+const CONDITIONS = ['youControl', 'yourLifeAtMost', 'cardsInYourGraveyardAtLeast'];
 const STATIC_AFFECTS = [
   'self', 'attached', 'creatures_you_control', 'other_creatures_you_control', 'creatures_opponents_control', 'all_creatures',
 ];
@@ -118,9 +119,28 @@ function describeTarget(t) {
   return map[k] || `${k}を対象とする`;
 }
 
+function describeCondition(c) {
+  if (!c) return '';
+  const parts = [];
+  if (c.youControl) {
+    const t = TYPE_JA[c.youControl.type] || c.youControl.type;
+    const n = c.youControl.min ?? 1;
+    parts.push(`あなたが${t}を${n > 1 ? n + 'つ以上' : ''}コントロールしている`);
+  }
+  if (c.yourLifeAtMost !== undefined) parts.push(`あなたのライフが${c.yourLifeAtMost}点以下である`);
+  if (c.cardsInYourGraveyardAtLeast !== undefined) parts.push(`あなたの墓地にカードが${c.cardsInYourGraveyardAtLeast}枚以上ある`);
+  const isResonance = c.youControl && c.youControl.type === 'Artifact' && parts.length === 1;
+  return (isResonance ? '共鳴 ― ' : '') + parts.join('かつ') + 'なら、';
+}
+
 function describeEffect(e) {
+  return describeCondition(e.condition) + describeEffectBody(e);
+}
+
+function describeEffectBody(e) {
   const n = e.amount ?? 1;
-  const who = e.target ? '対象' : { you: 'あなた', each_opponent: '各対戦相手', each_player: '各プレイヤー', self: 'これ', all_creatures: '全てのクリーチャー', creatures_you_control: 'あなたのクリーチャー', creatures_opponents_control: '対戦相手のクリーチャー' }[e.subject] || '';
+  const selfDefault = !e.target && !e.subject && !['draw', 'gain_life', 'lose_life', 'add_mana', 'token', 'discard', 'mill', 'scry', 'counter', 'return_from_graveyard', 'attach'].includes(e.action);
+  const who = e.target ? '対象' : selfDefault ? 'これ' : { you: 'あなた', each_opponent: '各対戦相手', each_player: '各プレイヤー', self: 'これ', all_creatures: '全てのクリーチャー', creatures_you_control: 'あなたがコントロールする各クリーチャー', other_creatures_you_control: 'あなたがコントロールする他の各クリーチャー', creatures_opponents_control: '対戦相手がコントロールする各クリーチャー', attached: 'つけられているクリーチャー' }[e.subject] || '';
   switch (e.action) {
     case 'damage': return `${who}に${n}点のダメージを与える`;
     case 'draw': return `カードを${n}枚引く`;
@@ -133,7 +153,7 @@ function describeEffect(e) {
     case 'untap': return `${who}をアンタップする`;
     case 'pump': return `ターン終了時まで${who}は+${e.power || 0}/+${e.toughness || 0}${e.keywords ? 'と' + e.keywords.map((k) => KEYWORD_JA[k] || k).join('・') : ''}を得る`.replace(/\+-/g, '-');
     case 'counters': return `${who}に+1/+1カウンターを${n}個置く`;
-    case 'token': return `${e.token?.power}/${e.token?.toughness}の${e.token?.name || 'トークン'}を${n}体生成する`;
+    case 'token': return isCreatureToken(e.token) ? `${(e.token.keywords || []).length ? arr(e.token.keywords).map((k) => KEYWORD_JA[normKw(k)] || k).join('と') + 'を持つ' : ''}${e.token.power}/${e.token.toughness}の${e.token.name || 'トークン'}・クリーチャー・トークンを${n}体生成する` : `${e.token?.name || 'トークン'}・トークンを${n}つ生成する`;
     case 'counter': return '対象の呪文を打ち消す';
     case 'discard': return `${who}はカードを${n}枚捨てる`;
     case 'mill': return `${who}はライブラリーの上から${n}枚を墓地に置く`;
@@ -141,20 +161,35 @@ function describeEffect(e) {
     case 'return_from_graveyard': return `対象のカードを${e.to === 'battlefield' ? '戦場' : '手札'}に戻す`;
     case 'attach': return '対象のクリーチャーにつける';
     case 'sacrifice': return 'これを生け贄に捧げる';
+    case 'scry': return `占術${n}を行う`;
     default: return e.action;
   }
+}
+
+function fmtCost(cost) {
+  return String(cost || '').split(',').map((x) => x.trim()).map((x) => (/^sacrifice$/i.test(x) ? 'これを生け贄に捧げる' : /^life:(\d+)$/i.test(x) ? `${x.split(':')[1]}点のライフを支払う` : x)).join('、');
+}
+
+function isCreatureToken(t) {
+  return !t || !t.types || arr(t.types).includes('Creature');
 }
 
 function autoText(d) {
   const lines = [];
   if (d.keywords.length) lines.push(d.keywords.map((k) => KEYWORD_JA[k] || k).join('、'));
   if (d.isAura) lines.push(`エンチャント（${d.enchant === 'creature' ? 'クリーチャー' : d.enchant}）`);
-  const trig = { etb: 'これが戦場に出たとき', dies: 'これが死亡したとき', attacks: 'これが攻撃したとき', upkeep: 'あなたのアップキープの開始時', end_step: 'あなたの終了ステップの開始時', creature_etb_you_control: '他のクリーチャーがあなたのコントロール下で戦場に出るたび', landfall: '土地があなたのコントロール下で戦場に出るたび', cast_spell: 'あなたが呪文を唱えるたび', deals_combat_damage_to_player: 'これがプレイヤーに戦闘ダメージを与えるたび' };
+  const trig = { etb: 'これが戦場に出たとき', dies: 'これが死亡したとき', attacks: 'これが攻撃したとき', upkeep: 'あなたのアップキープの開始時', end_step: 'あなたの終了ステップの開始時', creature_etb_you_control: '他のクリーチャーがあなたのコントロール下で戦場に出るたび', landfall: '土地があなたのコントロール下で戦場に出るたび', cast_spell: 'あなたが呪文を唱えるたび', deals_combat_damage_to_player: 'これがプレイヤーに戦闘ダメージを与えるたび', creature_dies: '他のクリーチャーが死亡するたび', artifact_etb_you_control: 'アーティファクトがあなたのコントロール下で戦場に出るたび' };
   const eff = (es) => es.map((e) => (e.target && !String(e.target).startsWith('$') ? describeTarget(e.target) + '。' : '') + describeEffect(e)).join('。');
   if (d.spellEffects.length) lines.push(eff(d.spellEffects) + '。');
   for (const a of d.abilities) {
-    if (a.type === 'triggered') lines.push(`${trig[a.trigger] || a.trigger}、${eff(a.effects || [])}。`);
-    if (a.type === 'activated') lines.push(`${a.cost}：${eff(a.effects || [])}。${a.speed === 'sorcery' ? '（ソーサリー・タイミング）' : ''}`);
+    if (a.type === 'triggered') {
+      let tr = trig[a.trigger] || a.trigger;
+      if (a.trigger === 'cast_spell' && a.filter === 'noncreature') tr = 'あなたがクリーチャーでない呪文を唱えるたび';
+      if (a.trigger === 'creature_dies' && a.filter === 'yours') tr = 'あなたがコントロールする他のクリーチャーが死亡するたび';
+      if (a.trigger === 'creature_dies' && a.filter === 'opponents') tr = '対戦相手がコントロールするクリーチャーが死亡するたび';
+      lines.push(`${tr}、${eff(a.effects || [])}。`);
+    }
+    if (a.type === 'activated') lines.push(`${fmtCost(a.cost)}：${eff(a.effects || [])}。${a.speed === 'sorcery' ? '（ソーサリー・タイミング）' : ''}`);
     if (a.type === 'static' && a.modify) {
       const af = { self: 'これ', attached: 'つけられているクリーチャー', creatures_you_control: 'あなたがコントロールするクリーチャー', other_creatures_you_control: 'あなたがコントロールする他のクリーチャー', creatures_opponents_control: '対戦相手がコントロールするクリーチャー', all_creatures: '全てのクリーチャー' }[a.affects] || a.affects;
       const m = a.modify;
@@ -200,13 +235,25 @@ function validateSet(json, fileExists = () => true) {
         if (!/^\$\d+$/.test(k) && !TARGET_KINDS.includes(k)) errors.push(`${w}: 未対応の target "${k}"`);
       }
       if (e.subject !== undefined && !SUBJECTS.includes(e.subject)) errors.push(`${w}: 未対応の subject "${e.subject}"`);
-      if (e.action === 'token' && (!e.token || typeof e.token.power !== 'number')) errors.push(`${w}: token には token.power/toughness が必要です`);
+      if (e.action === 'token') {
+        if (!e.token) errors.push(`${w}: token には token の定義が必要です`);
+        else {
+          arr(e.token.types).forEach((t) => !CARD_TYPES.includes(t) && errors.push(`${w}: token.types が不正 "${t}"`));
+          if (isCreatureToken(e.token) && (typeof e.token.power !== 'number' || typeof e.token.toughness !== 'number')) errors.push(`${w}: クリーチャー・トークンには token.power/toughness が必要です`);
+        }
+      }
+      if (e.condition !== undefined) {
+        if (typeof e.condition !== 'object') errors.push(`${w}: condition はオブジェクトです`);
+        else Object.keys(e.condition).forEach((k) => !CONDITIONS.includes(k) && errors.push(`${w}: 未対応の condition "${k}"`));
+        if (e.condition && e.condition.youControl && !CARD_TYPES.includes(e.condition.youControl.type)) errors.push(`${w}: condition.youControl.type が不正`);
+      }
     });
     checkEffects(c.effects, '');
     arr(c.abilities).forEach((a, j) => {
       const w = `abilities[${j}]`;
       if (!['spell', 'triggered', 'activated', 'static', 'mana'].includes(a.type)) errors.push(`${at} ${w}: 未対応の type "${a.type}"`);
       if (a.type === 'triggered' && !TRIGGERS.includes(a.trigger)) errors.push(`${at} ${w}: 未対応の trigger "${a.trigger}"`);
+      if (a.type === 'triggered' && a.filter !== undefined && !['noncreature', 'yours', 'opponents'].includes(a.filter)) errors.push(`${at} ${w}: 未対応の filter "${a.filter}"`);
       if (a.type === 'activated') { try { parseActivationCost(a.cost); } catch (e) { errors.push(`${at} ${w}: ${e.message}`); } }
       if (a.type === 'static' && !STATIC_AFFECTS.includes(a.affects)) errors.push(`${at} ${w}: 未対応の affects "${a.affects}"`);
       if (a.type === 'mana') arr(a.produce || 'C').forEach((p) => p !== 'any' && ![...COLORS, 'C'].includes(String(p).toUpperCase()) && errors.push(`${at} ${w}: produce が不正 "${p}"`));
@@ -217,6 +264,6 @@ function validateSet(json, fileExists = () => true) {
 }
 
 module.exports = {
-  FORMAT, CARD_TYPES, KEYWORDS, KEYWORD_JA, ACTIONS, TARGET_KINDS, SUBJECTS, TRIGGERS, STATIC_AFFECTS, RARITIES,
+  FORMAT, CARD_TYPES, KEYWORDS, KEYWORD_JA, ACTIONS, TARGET_KINDS, SUBJECTS, TRIGGERS, STATIC_AFFECTS, RARITIES, CONDITIONS,
   normalizeDef, validateSet, typeLine, describeTarget,
 };
